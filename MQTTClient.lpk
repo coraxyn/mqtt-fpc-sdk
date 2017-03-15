@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CONFIG>
+  <Package Version="4">
+    <PathDelim Value="\"/>
+    <Name Value="MQTTClient"/>
+    <Author Value="pascal.tonin@it.fr"/>
+    <CompilerOptions>
+      <Version Value="11"/>
+      <PathDelim Value="\"/>
+      <SearchPaths>
+        <IncludeFiles Value="$(ProjOutDir);synapse"/>
+        <OtherUnitFiles Value="TMQTTClient;synapse"/>
+        <UnitOutputDirectory Value="lib\$(TargetCPU)-$(TargetOS)\"/>
+      </SearchPaths>
+      <Other>
+        <CompilerMessages>
+          <MsgFileName Value=""/>
+        </CompilerMessages>
+        <CompilerPath Value="$(CompPath)"/>
+      </Other>
+    </CompilerOptions>
+    <License Value="MIT"/>
+    <Version Minor="9"/>
+    <Files Count="11">
+      <Item1>
+        <Filename Value="TMQTTClient\MQTT.pas"/>
+        <UnitName Value="MQTT"/>
+      </Item1>
+      <Item2>
+        <Filename Value="TMQTTClient\MQTTReadThread.pas"/>
+        <UnitName Value="MQTTReadThread"/>
+      </Item2>
+      <Item3>
+        <Filename Value="synapse\blcksock.pas"/>
+        <UnitName Value="blcksock"/>
+      </Item3>
+      <Item4>
+        <Filename Value="synapse\jedi.inc"/>
+        <Type Value="Include"/>
+      </Item4>
+      <Item5>
+        <Filename Value="synapse\ssfpc.inc"/>
+        <Type Value="Include"/>
+      </Item5>
+      <Item6>
+        <Filename Value="synapse\sswin32.inc"/>
+        <Type Value="Include"/>
+      </Item6>
+      <Item7>
+        <Filename Value="synapse\synacode.pas"/>
+        <UnitName Value="synacode"/>
+      </Item7>
+      <Item8>
+        <Filename Value="synapse\synafpc.pas"/>
+        <UnitName Value="synafpc"/>
+      </Item8>
+      <Item9>
+        <Filename Value="synapse\synaip.pas"/>
+        <UnitName Value="synaip"/>
+      </Item9>
+      <Item10>
+        <Filename Value="synapse\synautil.pas"/>
+        <UnitName Value="synautil"/>
+      </Item10>
+      <Item11>
+        <Filename Value="synapse\synsock.pas"/>
+        <UnitName Value="synsock"/>
+      </Item11>
+    </Files>
+    <Type Value="RunTimeOnly"/>
+    <RequiredPkgs Count="1">
+      <Item1>
+        <PackageName Value="FCL"/>
+      </Item1>
+    </RequiredPkgs>
+    <UsageOptions>
+      <UnitPath Value="$(PkgOutDir)"/>
+    </UsageOptions>
+    <PublishOptions>
+      <Version Value="2"/>
+    </PublishOptions>
+  </Package>
+</CONFIG>
