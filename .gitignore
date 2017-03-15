@@ -12,3 +12,6 @@ bin/*
 *.ppu
 *.*~
 examples/embeddedApp/embeddedApp
+backup
+lib
+*.lps
