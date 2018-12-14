@@ -33,46 +33,48 @@ unit MQTTReadThread;
 interface
 
 uses
-  SysUtils, Classes,
+  SysUtils, Classes, blcksock,
 {$IFDEF LINUX}
-BaseUnix
+  BaseUnix,
 {$ENDIF}
-  blcksock;
+   synsock;
 
 {$IFNDEF LINUX}
 { TODO : Find value ESysETIMEDOUT for windows }
 const ESysETIMEDOUT = 110; // http://www.chiark.greenend.org.uk/doc/fp-docs/2.6.4/rtl/baseunix/esysetimedout.html
 {$ENDIF}
 
-type TBytes = array of byte;
+type
+  TBytes = array of byte;
 
 type
   TMQTTMessage = record
     FixedHeader: byte;
-    RL:   TBytes;
+    RL: TBytes;
     Data: TBytes;
   end;
 
-type TRxStates = (RX_START, RX_FIXED_HEADER, RX_LENGTH, RX_DATA, RX_ERROR);
-
-  PTCPBlockSocket = ^TTCPBlockSocket;
+type
+  TRxStates = (RX_START, RX_FIXED_HEADER, RX_LENGTH, RX_DATA, RX_ERROR);
 
   TRemainingLength = array of byte;
 
   TUTF8Text = array of byte;
 
   TConnAckEvent = procedure(Sender: TObject; ReturnCode: integer) of object;
-  TPublishEvent = procedure(Sender: TObject; topic, payload: ansistring) of object;
+  TPublishEvent = procedure(Sender: TObject; topic, payload: ansistring;
+    retain: boolean) of object;
   TPingRespEvent = procedure(Sender: TObject) of object;
-  TSubAckEvent   = procedure(Sender: TObject; MessageID: integer; GrantedQoS: integer) of object;
+  TSubAckEvent = procedure(Sender: TObject; MessageID: integer;
+    GrantedQoS: integer) of object;
   TUnSubAckEvent = procedure(Sender: TObject; MessageID: integer) of object;
 
   TMQTTReadThread = class(TThread)
   private
     FClientID: ansistring;
     FHostname: ansistring;
-    FPort:     integer;
-    FPSocket:  PTCPBlockSocket;
+    FPort: integer;
+    //FPSocket:  PTCPBlockSocket;
     CurrentMessage: TMQTTMessage;
     // Events
     FConnAckEvent: TConnAckEvent;
@@ -86,14 +88,15 @@ type TRxStates = (RX_START, RX_FIXED_HEADER, RX_LENGTH, RX_DATA, RX_ERROR);
 
     // This is our data processing and event firing command.
     procedure HandleData;
-
-    function SocketWrite(Data: TBytes): boolean;
-
   protected
     procedure Execute;
       override;
   public
-    constructor Create(Socket: PTCPBlockSocket; Hostname: ansistring; Port: integer);
+    //todo: change Socket resurse working
+    FPSocket: TTCPBlockSocket;
+    function SocketWrite(Data: TBytes): boolean;
+
+    constructor Create(Hostname: ansistring; Port: integer);
     property OnConnAck: TConnAckEvent read FConnAckEvent write FConnAckEvent;
     property OnPublish: TPublishEvent read FPublishEvent write FPublishEvent;
     property OnPingResp: TPingRespEvent read FPingRespEvent write FPingRespEvent;
@@ -106,192 +109,258 @@ implementation
 uses
   MQTT;
 
+procedure SetBit(var Value: byte; const Index: byte; const State: boolean); inline;
+begin
+  Value := (Value and ((byte(1) shl Index) xor High(byte))) or
+    (byte(State) shl Index);
+end;
+
+function GetBit(const Value: byte; const Index: byte): boolean; inline;
+begin
+  Result := ((Value shr Index) and 1) = 1;
+end;
+
 { TMQTTReadThread }
 
-constructor TMQTTReadThread.Create(Socket: PTCPBlockSocket; HostName: ansistring; Port: integer);
-
+constructor TMQTTReadThread.Create(HostName: ansistring; Port: integer);
 begin
   inherited Create(True);
+
   // Create a Default ClientID as a default. Can be overridden with TMQTTClient.ClientID any time before connection.
   FClientID := 'dMQTTClientx' + IntToStr(Random(1000) + 1);
-  FPSocket  := Socket;
+  //FPSocket  := Socket;
   FHostname := Hostname;
-  FPort     := Port;
+  FPort := Port;
   FreeOnTerminate := True;
 end;
 
 procedure TMQTTReadThread.Execute;
-
 var
   rxState: TRxStates;
   remainingLengthx: integer;
-  digit:   integer;
+  digit: integer;
   multiplier: integer;
-  Data:    TBytes;
-  RL:      TRemainingLength;
-  VH:      TBytes;
-  FH:      byte;
+  Data: TBytes;
+  RL: TRemainingLength;
+  VH: TBytes;
+  FH: byte;
   Payload: TUTF8Text;
-  error:   integer;
+  error: integer;
 begin
   rxState := RX_START;
+  try
+    // Create a socket.
+    FPSocket := TTCPBlockSocket.Create;
+    FPSocket.nonBlockMode := True;                // We really don't want sending on
+    FPSocket.NonblockSendTimeout := 1;
+    // the socket to block our main thread.
+    while not self.Terminated do
+    begin
+      case rxState of
+        RX_START:
+        begin
+          // Make the socket connection
+          FPSocket.Connect(FHostname, IntToStr(FPort));
 
-  while not self.Terminated do begin
-    case rxState of
-      RX_START: begin
-        // Make the socket connection
-        FPSocket^.Connect(FHostname, IntToStr(FPort));
+          //  Build CONNECT message
+          FH := FixedHeader(MQTT.CONNECT, 0, 0, 0);
+          VH := VariableHeaderConnect(40);
+          SetLength(Payload, 0);
+          AppendArray(Payload, StrToBytes(FClientID, True));
+          AppendArray(Payload, StrToBytes('lwt', True));
+          AppendArray(Payload, StrToBytes(FClientID + ' died', True));
+          RL := RemainingLength(Length(VH) + Length(Payload));
+          Data := BuildCommand(FH, RL, VH, Payload);
 
-        //  Build CONNECT message
-        FH := FixedHeader(MQTT.CONNECT, 0, 0, 0);
-        VH := VariableHeaderConnect(40);
-        SetLength(Payload, 0);
-        AppendArray(Payload, StrToBytes(FClientID, True));
-        AppendArray(Payload, StrToBytes('lwt', True));
-        AppendArray(Payload, StrToBytes(FClientID + ' died', True));
-        RL   := RemainingLength(Length(VH) + Length(Payload));
-        Data := BuildCommand(FH, RL, VH, Payload);
+          writeln('RX_START: ', FPSocket.LastErrorDesc);
+          writeln('RX_START: ', FPSocket.LastError);
 
-        writeln('RX_START: ', FPSocket^.LastErrorDesc);
-        writeln('RX_START: ', FPSocket^.LastError);
+          //sleep(1);
 
-        //sleep(1);
-
-        // Send CONNECT message
-        while True do begin
-          writeln('loop...');
-          SocketWrite(Data);
-          error := FPSocket^.LastError;
-          writeln('RX_START: ', FPSocket^.LastErrorDesc);
-          writeln('RX_START: ', error);
-          if error = 0 then begin
-            rxState := RX_FIXED_HEADER;
-            break;
-          end else begin
-            if error = 110 then begin
-              continue;
+          // Send CONNECT message
+          while not self.Terminated do
+          begin
+            writeln('loop...');
+            SocketWrite(Data);
+            error := FPSocket.LastError;
+            writeln('RX_START: ', FPSocket.LastErrorDesc);
+            writeln('RX_START: ', error);
+            if error = 0 then
+            begin
+              rxState := RX_FIXED_HEADER;
+              break;
+            end
+            else
+            begin
+              if error = 110 then
+              begin
+                continue;
+              end;
+              rxState := RX_ERROR;
+              break;
             end;
-            rxState := RX_ERROR;
-            break;
           end;
         end;
-      end;
-      RX_FIXED_HEADER: begin
-        multiplier := 1;
-        remainingLengthx := 0;
-        CurrentMessage.Data := nil;
+        RX_FIXED_HEADER:
+        begin
+          multiplier := 1;
+          remainingLengthx := 0;
+          CurrentMessage.Data := nil;
 
-        CurrentMessage.FixedHeader := FPSocket^.RecvByte(1000);
-        if (FPSocket^.LastError = ESysETIMEDOUT) then continue;
-        if (FPSocket^.LastError <> 0) then rxState := RX_ERROR
-        else
-          rxState := RX_LENGTH;
-      end;
-      RX_LENGTH: begin
-        digit := FPSocket^.RecvByte(1000);
-        if (FPSocket^.LastError = ESysETIMEDOUT) then continue;
-        if (FPSocket^.LastError <> 0) then rxState := RX_ERROR
-        else begin
-          remainingLengthx := remainingLengthx + (digit and 127) * multiplier;
-          if (digit and 128) > 0 then begin
-            multiplier := multiplier * 128;
-            rxState    := RX_LENGTH;
-          end else
-            rxState := RX_DATA;
+          CurrentMessage.FixedHeader := FPSocket.RecvByte(1000);
+          if (FPSocket.LastError = WSAETIMEDOUT) then
+            continue;
+          if (FPSocket.LastError <> 0) then
+            rxState := RX_ERROR
+          else
+            rxState := RX_LENGTH;
         end;
-      end;
-      RX_DATA: begin
-        SetLength(CurrentMessage.Data, remainingLengthx);
-        FPSocket^.RecvBufferEx(Pointer(CurrentMessage.Data), remainingLengthx, 1000);
-        if (FPSocket^.LastError <> 0) then rxState := RX_ERROR
-        else begin
-          HandleData;
-          rxState := RX_FIXED_HEADER;
+        RX_LENGTH:
+        begin
+          digit := FPSocket.RecvByte(1000);
+          if (FPSocket.LastError = WSAETIMEDOUT) then
+            continue;
+          if (FPSocket.LastError <> 0) then
+            rxState := RX_ERROR
+          else
+          begin
+            remainingLengthx :=
+              remainingLengthx + (digit and 127) * multiplier;
+            if (digit and 128) > 0 then
+            begin
+              multiplier := multiplier * 128;
+              rxState := RX_LENGTH;
+            end
+            else
+              rxState := RX_DATA;
+          end;
         end;
-      end;
-      RX_ERROR: begin
-        // Quit the loop, terminating the thread.
-        break;
+        RX_DATA:
+        begin
+          SetLength(CurrentMessage.Data, remainingLengthx);
+          FPSocket.RecvBufferEx(Pointer(CurrentMessage.Data),
+            remainingLengthx, 1000);
+          if (FPSocket.LastError <> 0) then
+            rxState := RX_ERROR
+          else
+          begin
+            HandleData;
+            rxState := RX_FIXED_HEADER;
+          end;
+        end;
+        RX_ERROR:
+        begin
+          // Quit the loop, terminating the thread.
+          break;
+        end;
       end;
     end;
-  end;
+  finally
+    FPSocket.CloseSocket();
+    FreeAndNil(FPSocket);
+  end; // try
 end;
 
 procedure TMQTTReadThread.HandleData;
-
 var
   MessageType: byte;
   DataLen: integer;
-  QoS:     integer;
-  Topic:   ansistring;
+  QoS: integer;
+  Retain: boolean;
+  Topic: ansistring;
   Payload: ansistring;
   ResponseVH: TBytes;
   ConnectReturn: integer;
 begin
-  if (CurrentMessage.FixedHeader <> 0) then begin
+  if (CurrentMessage.FixedHeader <> 0) then
+  begin
     MessageType := CurrentMessage.FixedHeader shr 4;
 
-    if (MessageType = Ord(MQTT.CONNACK)) then begin
+    if (MessageType = Ord(MQTT.CONNACK)) then
+    begin
       // Check if we were given a Connect Return Code.
       // Any return code except 0 is an Error
-      if ((Length(CurrentMessage.Data) > 0) and (Length(CurrentMessage.Data) < 4)) then begin
+      if ((Length(CurrentMessage.Data) > 0) and
+        (Length(CurrentMessage.Data) < 4)) then
+      begin
         ConnectReturn := CurrentMessage.Data[1];
-        if Assigned(OnConnAck) then OnConnAck(Self, ConnectReturn);
+        if Assigned(OnConnAck) then
+          OnConnAck(Self, ConnectReturn);
       end;
-    end else if (MessageType = Ord(MQTT.PUBLISH)) then begin
-      // Read the Length Bytes
-      DataLen := BytesToStrLength(Copy(CurrentMessage.Data, 0, 2));
-      // Get the Topic
-      SetString(Topic, PChar(@CurrentMessage.Data[2]), DataLen);
-      // Get the Payload
-      SetString(Payload, PChar(@CurrentMessage.Data[2 + DataLen]),
-        (Length(CurrentMessage.Data) - 2 - DataLen));
-      if Assigned(OnPublish) then OnPublish(Self, Topic, Payload);
-    end else if (MessageType = Ord(MQTT.SUBACK)) then begin
-      // Reading the Message ID
-      ResponseVH := Copy(CurrentMessage.Data, 0, 2);
-      DataLen := BytesToStrLength(ResponseVH);
-      // Next Read the Granted QoS
-      QoS := 0;
-      if (Length(CurrentMessage.Data) - 2) > 0 then begin
-        ResponseVH := Copy(CurrentMessage.Data, 2, 1);
-        QoS := ResponseVH[0];
-      end;
-      if Assigned(OnSubAck) then OnSubAck(Self, DataLen, QoS);
-    end else if (MessageType = Ord(MQTT.UNSUBACK)) then begin
-      // Read the Message ID for the event handler
-      ResponseVH := Copy(CurrentMessage.Data, 0, 2);
-      DataLen    := BytesToStrLength(ResponseVH);
-      if Assigned(OnUnSubAck) then OnUnSubAck(Self, DataLen);
-    end else if (MessageType = Ord(MQTT.PINGRESP)) then begin
-      if Assigned(OnPingResp) then OnPingResp(Self);
-    end;
+    end
+    else
+      if (MessageType = Ord(MQTT.PUBLISH)) then
+      begin
+        Retain := GetBit(CurrentMessage.FixedHeader, 0);
+        // Read the Length Bytes
+        DataLen := BytesToStrLength(Copy(CurrentMessage.Data, 0, 2));
+        // Get the Topic
+        SetString(Topic, PChar(@CurrentMessage.Data[2]), DataLen);
+        // Get the Payload
+        SetString(Payload, PChar(@CurrentMessage.Data[2 + DataLen]),
+          (Length(CurrentMessage.Data) - 2 - DataLen));
+        if Assigned(OnPublish) then
+          OnPublish(Self, Topic, Payload, retain);
+      end
+      else
+        if (MessageType = Ord(MQTT.SUBACK)) then
+        begin
+          // Reading the Message ID
+          ResponseVH := Copy(CurrentMessage.Data, 0, 2);
+          DataLen := BytesToStrLength(ResponseVH);
+          // Next Read the Granted QoS
+          QoS := 0;
+          if (Length(CurrentMessage.Data) - 2) > 0 then
+          begin
+            ResponseVH := Copy(CurrentMessage.Data, 2, 1);
+            QoS := ResponseVH[0];
+          end;
+          if Assigned(OnSubAck) then
+            OnSubAck(Self, DataLen, QoS);
+        end
+        else
+          if (MessageType = Ord(MQTT.UNSUBACK)) then
+          begin
+            // Read the Message ID for the event handler
+            ResponseVH := Copy(CurrentMessage.Data, 0, 2);
+            DataLen := BytesToStrLength(ResponseVH);
+            if Assigned(OnUnSubAck) then
+              OnUnSubAck(Self, DataLen);
+          end
+          else
+            if (MessageType = Ord(MQTT.PINGRESP)) then
+            begin
+              if Assigned(OnPingResp) then
+                OnPingResp(Self);
+            end;
   end;
 end;
 
 function TMQTTReadThread.BytesToStrLength(LengthBytes: TBytes): integer;
 begin
   Assert(Length(LengthBytes) = 2,
-    'TMQTTReadThread: UTF-8 Length Bytes preceeding the text must be 2 Bytes in Legnth'
-    );
+    'TMQTTReadThread: UTF-8 Length Bytes preceeding the text must be 2 Bytes in Legnth');
+
   Result := 0;
   Result := LengthBytes[0] shl 8;
   Result := Result + LengthBytes[1];
 end;
 
 function TMQTTReadThread.SocketWrite(Data: TBytes): boolean;
-
 var
   sentData: integer;
 begin
   Result := False;
   // Returns whether the Data was successfully written to the socket.
 
-  while not FPSocket^.CanWrite(0) do begin
+  while not FPSocket.CanWrite(0) do
+  begin
     sleep(100);
   end;
 
-  sentData := FPSocket^.SendBuffer(Pointer(Data), Length(Data));
-  if sentData = Length(Data) then Result := True;
+  sentData := FPSocket.SendBuffer(Pointer(Data), Length(Data));
+  if sentData = Length(Data) then
+    Result := True;
 end;
+
 end.
