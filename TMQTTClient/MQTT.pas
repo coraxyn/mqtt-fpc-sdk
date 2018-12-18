@@ -115,6 +115,7 @@ type
     FPingRespEvent: TPingRespEvent;
     FSubAckEvent: TSubAckEvent;
     FUnSubAckEvent: TUnSubAckEvent;
+    FOnMonitorEvent: TMonitorEvent;
 
     FCritical: TRTLCriticalSection;
     FMessageQueue: TQueue;
@@ -137,6 +138,7 @@ type
     procedure OnRTPublish(Sender: TObject; topic, payload: ansistring;
       retain: boolean);
     procedure OnRTTerminate(Sender: TObject);
+    procedure Monitor(const TheIsRead, TheIsError: boolean; TheArgs: array of const);
 
   public
     function isConnected: boolean;
@@ -160,6 +162,7 @@ type
     property OnPingResp: TPingRespEvent read FPingRespEvent write FPingRespEvent;
     property OnSubAck: TSubAckEvent read FSubAckEvent write FSubAckEvent;
     property OnUnSubAck: TUnSubAckEvent read FUnSubAckEvent write FUnSubAckEvent;
+    property OnMonitorEvent: TMonitorEvent read FOnMonitorEvent write FOnMonitorEvent;
   end;
 
 // Message Component Build helpers
@@ -237,6 +240,7 @@ begin
     FReadThread.OnPingResp := @OnRTPingResp;
     FReadThread.OnSubAck := @OnRTSubAck;
     FReadThread.OnTerminate := @OnRTTerminate;
+    FReadThread.OnMonitor := OnMonitorEvent;
     FReadThread.Start;
     FReaderThreadRunning := True;
   end;
@@ -251,7 +255,8 @@ function TMQTTClient.Disconnect: boolean;
 var
   Data: TBytes;
 begin
-  writeln('TMQTTClient.Disconnect');
+  // writeln('TMQTTClient.Disconnect');
+  Monitor(false, false, ['Disconnect']);
   Result := False;
 
   SetLength(Data, 2);
@@ -286,7 +291,8 @@ end;
 ------------------------------------------------------------------------------*}
 procedure TMQTTClient.ForceDisconnect;
 begin
-  writeln('TMQTTClient.ForceDisconnect');
+  // writeln('TMQTTClient.ForceDisconnect');
+  Monitor(false, false, ['ForceDisconnect']);
   if FReadThread <> nil then
   begin
     FReadThread.OnTerminate := nil;
@@ -311,7 +317,17 @@ begin
   FReadThread := nil;
   FReaderThreadRunning := False;
   FisConnected := False;
-  WriteLn('TMQTTClient.OnRTTerminate: Thread.Terminated.');
+  // WriteLn('TMQTTClient.OnRTTerminate: Thread.Terminated.');
+  Monitor(false, false, ['Thread.Terminated']);
+end;
+
+{*------------------------------------------------------------------------------
+  Raise a monitor event.
+------------------------------------------------------------------------------*}
+procedure TMQTTClient.Monitor(const TheIsRead, TheIsError: boolean; TheArgs: array of const);
+begin
+  if Assigned(FOnMonitorEvent) then FOnMonitorEvent(TheIsRead,TheIsError,TheArgs);
+
 end;
 
 {*------------------------------------------------------------------------------

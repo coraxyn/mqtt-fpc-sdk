@@ -68,6 +68,7 @@ type
   TSubAckEvent = procedure(Sender: TObject; MessageID: integer;
     GrantedQoS: integer) of object;
   TUnSubAckEvent = procedure(Sender: TObject; MessageID: integer) of object;
+  TMonitorEvent = procedure(const TheIsRead, TheIsError: boolean; TheArgs: array of const) of object;
 
   TMQTTReadThread = class(TThread)
   private
@@ -82,6 +83,7 @@ type
     FPingRespEvent: TPingRespEvent;
     FSubAckEvent: TSubAckEvent;
     FUnSubAckEvent: TUnSubAckEvent;
+    FOnMonitorEvent: TMonitorEvent;
 
     // Takes a 2 Byte Length array and returns the length of the ansistring it preceeds as per the spec.
     function BytesToStrLength(LengthBytes: TBytes): integer;
@@ -102,6 +104,8 @@ type
     property OnPingResp: TPingRespEvent read FPingRespEvent write FPingRespEvent;
     property OnSubAck: TSubAckEvent read FSubAckEvent write FSubAckEvent;
     property OnUnSubAck: TUnSubAckEvent read FUnSubAckEvent write FUnSubAckEvent;
+    property OnMonitor: TMonitorEvent read FOnMonitorEvent write FOnMonitorEvent;
+    procedure Monitor(const TheIsRead, TheIsError: boolean; TheArgs: array of const);
   end;
 
 implementation
@@ -132,6 +136,12 @@ begin
   FHostname := Hostname;
   FPort := Port;
   FreeOnTerminate := True;
+end;
+
+procedure TMQTTReadThread.Monitor(const TheIsRead, TheIsError: boolean; TheArgs: array of const);
+begin
+  if Assigned(FOnMonitorEvent) then FOnMonitorEvent(TheIsRead,TheIsError,TheArgs);
+
 end;
 
 procedure TMQTTReadThread.Execute;
@@ -172,19 +182,24 @@ begin
           RL := RemainingLength(Length(VH) + Length(Payload));
           Data := BuildCommand(FH, RL, VH, Payload);
 
-          writeln('RX_START: ', FPSocket.LastErrorDesc);
-          writeln('RX_START: ', FPSocket.LastError);
+          //writeln('RX_START: ', FPSocket.LastErrorDesc);
+          Monitor(true, Length(FPSocket.LastErrorDesc) > 0, ['RX_START: ', FPSocket.LastErrorDesc]);
+          //writeln('RX_START: ', FPSocket.LastError);
+          Monitor(true, FPSocket.LastError > 0, ['RX_START: ', FPSocket.LastError]);
 
           //sleep(1);
 
           // Send CONNECT message
           while not self.Terminated do
           begin
-            writeln('loop...');
+            // writeln('loop...');
+            Monitor(false, false, ['loop']);
             SocketWrite(Data);
             error := FPSocket.LastError;
-            writeln('RX_START: ', FPSocket.LastErrorDesc);
-            writeln('RX_START: ', error);
+            //writeln('RX_START: ', FPSocket.LastErrorDesc);
+            Monitor(true, Length(FPSocket.LastErrorDesc) > 0, ['RX_START: ', FPSocket.LastErrorDesc]);
+            //writeln('RX_START: ', error);
+            Monitor(true, error > 0, ['RX_START: ', error]);
             if error = 0 then
             begin
               rxState := RX_FIXED_HEADER;
