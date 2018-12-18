@@ -1,0 +1,27 @@
+{
+  "name": "mqtt-fpc-sdk",
+  "version": "1.0.0",
+  "description": "MQTT Framework for FPC",
+  "main": "a",
+  "directories": {
+    "example": "examples",
+    "lib": "lib",
+    "test": "test"
+  },
+  "scripts": {
+    "broker": "node test/broker.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://tfs.wit.fr/wit/OpenRedy/_git/mqtt-fpc-sdk"
+  },
+  "keywords": [
+    "mqtt",
+    "fpc"
+  ],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "mosca": "^2.8.3"
+  }
+}
